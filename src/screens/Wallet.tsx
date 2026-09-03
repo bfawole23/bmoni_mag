@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useStore } from "../state/store";
 import { Button, Card, CopyChip, CountUp, Drawer, EmptyState, Segmented, Skeleton, StatusPill, Timeline } from "../components/ui";
-import { IconSearch, IconFund, IconSend, IconReceipt, IconWallet, IconClock, IconInfo } from "../components/icons";
+import { IconSearch, IconFund, IconSend, IconReceipt, IconWallet, IconClock, IconInfo, IconDownload } from "../components/icons";
 import { cx, fmtDateTime, fmtMoney, timeAgo } from "../lib/utils";
 import type { Transaction } from "../types";
 
@@ -49,7 +49,7 @@ function TxRow({ t, onOpen, compact }: { t: Transaction; onOpen: () => void; com
 }
 
 export function WalletScreen() {
-  const { snap, routeParam, nav, settings } = useStore();
+  const { snap, routeParam, nav, settings, toast } = useStore();
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<Filter>("ALL");
   const [query, setQuery] = useState("");
@@ -81,6 +81,28 @@ export function WalletScreen() {
   }, [snap.transactions, filter, query]);
 
   const w = snap.wallet;
+
+  /* real behaviour: download the filtered movements as CSV */
+  const exportCsv = () => {
+    const keyFor = (t: Transaction) =>
+      snap.funding.find((f) => f.id === t.id)?.idempotencyKey ?? snap.transfers.find((x) => x.id === t.id)?.idempotencyKey ?? "";
+    const esc = (v: string | number) => `"${String(v).replace(/"/g, '""')}"`;
+    const rows = [
+      ["id", "timestamp", "title", "counterparty", "kind", "status", "amount_usd", "fee_usd", "provider_ref", "idempotency_key"],
+      ...filtered.map((t) => [
+        t.id, new Date(t.ts).toISOString(), t.title, t.counterparty, `${t.kind}/${t.subKind}`, t.status,
+        (t.amountCents / 100).toFixed(2), (t.feeCents / 100).toFixed(2), t.providerRef, keyFor(t),
+      ]),
+    ];
+    const blob = new Blob([rows.map((r) => r.map(esc).join(",")).join("\n")], { type: "text/csv" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `bmoni-${w?.id?.toLowerCase() ?? "wallet"}-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    toast("success", "Ledger exported", `${filtered.length} movement${filtered.length === 1 ? "" : "s"} → CSV.`);
+  };
+
   const postedIn = snap.transactions.filter((t) => t.amountCents > 0 && !IN_FLIGHT.includes(t.status) && t.status !== "CANCELLED" && t.status !== "FAILED").reduce((s, t) => s + t.amountCents - t.feeCents, 0);
   const postedOut = snap.transactions.filter((t) => t.amountCents < 0 && !IN_FLIGHT.includes(t.status) && t.status !== "CANCELLED" && t.status !== "REVERSED").reduce((s, t) => s + t.amountCents - t.feeCents, 0);
 
@@ -138,6 +160,9 @@ export function WalletScreen() {
       <Card className="overflow-hidden">
         <div className="flex flex-wrap items-center gap-3 border-b border-line px-5 py-4 sm:px-6">
           <h2 className="mr-auto font-display text-[15px] font-bold text-ink">Transaction history</h2>
+          <Button size="sm" variant="secondary" onClick={exportCsv} title="Export the filtered movements as CSV">
+            <IconDownload className="text-[13px]" /> CSV
+          </Button>
           <div className="relative">
             <IconSearch className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[15px] text-mute" />
             <input
@@ -213,6 +238,14 @@ export function WalletScreen() {
                 <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1.5 border-t border-line pt-3 text-[12px]">
                   <span className="text-mute">Reference</span>
                   <span className="text-right"><CopyChip text={liveOpen.providerRef} /></span>
+                  <span className="text-mute">Idempotency-Key</span>
+                  <span className="text-right">
+                    {(() => {
+                      const key = snap.funding.find((f) => f.id === liveOpen.id)?.idempotencyKey
+                        ?? snap.transfers.find((x) => x.id === liveOpen.id)?.idempotencyKey;
+                      return key ? <CopyChip text={key} label={`${key.slice(0, 14)}…`} /> : <span className="font-mono text-[11px] text-mute">seeded record</span>;
+                    })()}
+                  </span>
                   <span className="text-mute">Created</span>
                   <span className="text-right font-mono text-ink-soft">{fmtDateTime(liveOpen.ts)}</span>
                   <span className="text-mute">Method</span>

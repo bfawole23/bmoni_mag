@@ -1,8 +1,8 @@
 import { useMemo, useState } from "react";
-import { api, kindLabel, quoteTransferFee } from "../mock/api";
+import { api, kindLabel, quoteTransferFee, DAILY_LIMIT_CENTS, getDailyOutflowCents } from "../mock/api";
 import { ApiError, type Transfer, type TransferKind } from "../types";
 import { useStore } from "../state/store";
-import { Button, Card, CountUp, ErrorBanner, Field, InfoBanner, Select, StatusPill, Timeline } from "../components/ui";
+import { Button, Card, CopyChip, CountUp, ErrorBanner, Field, InfoBanner, Select, StatusPill, Timeline } from "../components/ui";
 import { IconSend, IconDownload, IconBolt, IconArrowR, IconLock, IconCheck, IconX, IconAlert, IconRefresh, IconId, IconBank } from "../components/icons";
 import { cx, fmtDateTime, fmtMoney, parseAmount, timeAgo } from "../lib/utils";
 
@@ -30,6 +30,7 @@ export function MoveScreen() {
   const [fields, setFields] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [activeId, setActiveId] = useState<string | null>(null);
+  const [reuseKey, setReuseKey] = useState<string | null>(null);
 
   const verified = snap.beneficiaries.filter((b) => b.status === "VERIFIED");
   const activeRails = snap.rails.filter((r) => r.status === "ACTIVE");
@@ -49,6 +50,24 @@ export function MoveScreen() {
       setStage("compose");
     } finally { setBusy(false); }
   }
+
+  /* safe retry: prefill the failed transfer and replay its Idempotency-Key */
+  const retryFailed = (t: Transfer) => {
+    setKind(t.kind);
+    setAmountRaw((t.amountCents / 100).toFixed(2));
+    if (t.kind === "SEND") {
+      const b = snap.beneficiaries.find((x) => x.name === t.destination);
+      if (b) setBeneficiaryId(b.id);
+    } else if (t.kind === "WITHDRAW") {
+      const r = snap.rails.find((x) => `${x.institution} ${x.accountMasked}` === t.destination);
+      if (r) setRailId(r.id);
+    } else setEmail(t.destination);
+    setNote(t.note ?? "");
+    setReuseKey(t.idempotencyKey ?? null);
+    setActiveId(null);
+    setStage("compose");
+    toast("info", "Safe retry armed", "Same Idempotency-Key — the ledger cannot double-post.");
+  };
 
   if (!kycOk) {
     return (
@@ -191,11 +210,16 @@ export function MoveScreen() {
                 On confirm, the full amount + fee is <b className="text-ink-soft">reserved on the ledger</b> (RESERVE entry) and released
                 at settlement. Sandbox: amounts ending <span className="font-mono text-bad">.13</span> fail, <span className="font-mono text-rev">.77</span> settle then reverse.
               </p>
+              <p className="mt-2.5 flex flex-wrap items-center gap-2 text-[12px] text-mute">
+                <IconLock className="shrink-0 text-[13px] text-pine" />
+                Carries an <span className="font-mono text-[11px] text-ink-soft">Idempotency-Key</span> — a replayed confirm never double-posts.
+                {reuseKey && <CopyChip text={reuseKey} label={`retry · ${reuseKey.slice(0, 12)}…`} />}
+              </p>
               <div className="mt-5 flex justify-between gap-2.5">
                 <Button variant="ghost" onClick={() => setStage("compose")}>Back</Button>
                 <Button size="lg" loading={busy} onClick={() => run(async () => {
-                  const id = await api.createTransfer(kind, amountCents!, { beneficiaryId, railId, email }, note);
-                  setActiveId(id); setStage("live");
+                  const id = await api.createTransfer(kind, amountCents!, { beneficiaryId, railId, email }, note, reuseKey ?? undefined);
+                  setActiveId(id); setReuseKey(null); setStage("live");
                   toast("info", "Reservation placed", `${fmtMoney(amountCents! + fee)} reserved on the ledger.`);
                 })}>
                   Confirm & reserve <IconCheck className="text-[15px]" />
@@ -207,7 +231,8 @@ export function MoveScreen() {
           {(stage === "live" || stage === "done") && active && (
             <ActiveTransfer key={active.id} t={active}
               onCancel={() => run(async () => { await api.cancelTransfer(active.id); toast("info", "Transfer cancelled", "Reservation released back to available balance."); setStage("done"); })}
-              onRestart={() => { setActiveId(null); setStage("compose"); setAmountRaw("120.00"); setNote(""); }}
+              onRestart={() => { setActiveId(null); setReuseKey(null); setStage("compose"); setAmountRaw("120.00"); setNote(""); }}
+              onRetry={() => retryFailed(active)}
               busy={busy} />
           )}
         </Card>
@@ -243,6 +268,7 @@ export function MoveScreen() {
             {snap.wallet && snap.wallet.pendingCents > 0 ? <span className="text-warn">{fmtMoney(snap.wallet.pendingCents)} reserved or incoming</span> : "no active reservations"}
           </p>
         </Card>
+        <DailyLimitCard />
         <Card className="p-5">
           <p className="font-display text-[11px] font-bold uppercase tracking-[0.14em] text-mute">Lifecycle</p>
           <div className="mt-3 space-y-2 font-mono text-[11.5px] leading-relaxed text-mute">
@@ -275,14 +301,37 @@ export function MoveScreen() {
   );
 }
 
+function DailyLimitCard() {
+  const used = getDailyOutflowCents();
+  const pct = Math.min(100, (used / DAILY_LIMIT_CENTS) * 100);
+  const tight = pct > 85;
+  return (
+    <Card className="p-5">
+      <div className="flex items-center justify-between">
+        <p className="font-display text-[11px] font-bold uppercase tracking-[0.14em] text-mute">Daily outflow limit</p>
+        <span className={cx("font-mono text-[10.5px] font-semibold tabular", tight ? "text-bad" : "text-mute")}>{pct.toFixed(0)}% used</span>
+      </div>
+      <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-paper">
+        <div className={cx("h-full rounded-full transition-all duration-700", tight ? "bg-bad" : "bg-pine")} style={{ width: `${pct}%` }} />
+      </div>
+      <p className="mt-2.5 font-mono text-[12px] tabular text-ink-soft">
+        {fmtMoney(used)} <span className="text-mute">of {fmtMoney(DAILY_LIMIT_CENTS)} today</span>
+      </p>
+      <p className="mt-2 text-[11.5px] leading-relaxed text-mute">
+        Enforced server-side on <span className="font-mono text-[10.5px]">/transfers</span> — failed &amp; cancelled intents don't count.
+      </p>
+    </Card>
+  );
+}
+
 function destReady(kind: TransferKind, b: string, r: string, email: string) {
   if (kind === "SEND") return !!b;
   if (kind === "WITHDRAW") return !!r;
   return email.includes("@");
 }
 
-function ActiveTransfer({ t, onCancel, onRestart, busy }: {
-  t: Transfer; onCancel: () => void; onRestart: () => void; busy: boolean;
+function ActiveTransfer({ t, onCancel, onRestart, onRetry, busy }: {
+  t: Transfer; onCancel: () => void; onRestart: () => void; onRetry: () => void; busy: boolean;
 }) {
   const terminal = ["COMPLETED", "FAILED", "CANCELLED", "REVERSED"].includes(t.status);
   const total = t.amountCents + t.feeCents;
@@ -292,7 +341,10 @@ function ActiveTransfer({ t, onCancel, onRestart, busy }: {
         <h2 className="font-display text-[19px] font-bold tracking-tight text-ink">{kindLabel(t.kind)} → {t.destination}</h2>
         <StatusPill status={t.status} />
       </div>
-      <p className="mt-1 font-mono text-[12px] text-mute">{t.providerRef} · created {fmtDateTime(t.createdAt)}</p>
+      <div className="mt-1.5 flex flex-wrap items-center gap-2 font-mono text-[12px] text-mute">
+        <span>{t.providerRef} · created {fmtDateTime(t.createdAt)}</span>
+        {t.idempotencyKey && <CopyChip text={t.idempotencyKey} label={`key ${t.idempotencyKey.slice(0, 12)}…`} />}
+      </div>
 
       {t.status === "PROCESSING" && (
         <div className="mt-6 space-y-5">
@@ -328,7 +380,16 @@ function ActiveTransfer({ t, onCancel, onRestart, busy }: {
               {t.status === "REVERSED" && "The provider recalled settled funds (sandbox reversal). A RELEASE entry returned the full amount to your balance."}
             </p>
           </div>
-          <Button className="w-full" onClick={onRestart}><IconRefresh className="text-[14px]" /> New transfer</Button>
+          <div className="flex gap-2.5">
+            {t.status === "FAILED" && (
+              <Button variant="secondary" className="flex-1" onClick={onRetry}>
+                <IconRefresh className="text-[14px]" /> Retry · same key
+              </Button>
+            )}
+            <Button className={cx("flex-1", t.status !== "FAILED" && "w-full")} onClick={onRestart}>
+              <IconRefresh className="text-[14px]" /> New transfer
+            </Button>
+          </div>
         </div>
       )}
 

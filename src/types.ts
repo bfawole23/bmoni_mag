@@ -87,6 +87,7 @@ export interface FundingIntent {
   status: FundingStatus;
   failReason?: string;
   providerRef: string;
+  idempotencyKey?: string;
   referenceCode?: string;
   createdAt: number;
   events: StateEvent[];
@@ -103,6 +104,7 @@ export interface Transfer {
   status: TransferStatus;
   failReason?: string;
   providerRef: string;
+  idempotencyKey?: string;
   createdAt: number;
   events: StateEvent[];
 }

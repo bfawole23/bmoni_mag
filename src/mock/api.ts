@@ -121,10 +121,18 @@ const me = (): UserRecord => {
 };
 const forMe = <T extends { userId: string }>(arr: T[]) => arr.filter((x) => x.userId === me().id);
 const ev = (state: string, note?: string): StateEvent => ({ state, at: Date.now(), note });
+/* Phase 2 idempotency-key foundation — every money-mutating intent carries one */
+const idemKey = () => `idem_${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36).slice(-4)}`;
 
 function notify(kind: Noti["kind"], title: string, body: string) {
   const userId = sessionUserId();
   if (!userId) return; // timer fired after sign-out — drop silently
+  /* honour the notification preferences from Settings */
+  const prefs = LS.get("bmoni.settings.v1", { notifyFunding: true, notifyTransfers: true, notifyKyc: true });
+  const t = title.toLowerCase();
+  if (prefs.notifyFunding === false && /fund/.test(t)) return;
+  if (prefs.notifyTransfers === false && /transfer|revers/.test(t)) return;
+  if (prefs.notifyKyc === false && /kyc|identity/.test(t)) return;
   db.notifications.unshift({ id: uid("NT"), userId, ts: Date.now(), title, body, kind, read: false });
 }
 
@@ -160,6 +168,18 @@ export function quoteTransferFee(kind: TransferKind, amountCents: number) {
   if (kind === "SEND") return Math.max(25, Math.round(amountCents * 0.005));
   if (kind === "WITHDRAW") return 100;
   return 0;
+}
+
+/* Phase 8 "apply fees & limits" — daily outflow limit, enforced in createTransfer */
+export const DAILY_LIMIT_CENTS = 2_500_000; // $25,000 per calendar day
+export function getDailyOutflowCents(): number {
+  const id = sessionUserId();
+  if (!id) return 0;
+  const dayStart = new Date();
+  dayStart.setHours(0, 0, 0, 0);
+  return db.transfers
+    .filter((x) => x.userId === id && x.createdAt >= dayStart.getTime() && x.status !== "FAILED" && x.status !== "CANCELLED")
+    .reduce((s, x) => s + x.amountCents + x.feeCents, 0);
 }
 
 /* settlement engines (reused by reconcile after reload) */
@@ -566,9 +586,10 @@ export const api = {
     const f: FundingIntent = {
       id: uid("FD"), userId: u.id, method, amountCents, feeCents: FEES[method](amountCents),
       status: "REQUIRES_ACTION", providerRef: `pv_${uid("rf")}`,
+      idempotencyKey: idemKey(),
       referenceCode: method === "BANK_TRANSFER" ? `BMONI-${Math.random().toString(36).slice(2, 8).toUpperCase()}` : undefined,
       createdAt: Date.now(),
-      events: [ev("CREATED"), ev("REQUIRES_ACTION", "Awaiting your payment")],
+      events: [ev("CREATED", "Idempotency-Key accepted"), ev("REQUIRES_ACTION", "Awaiting your payment")],
     };
     db.funding.push(f);
     save(); emit();
@@ -595,7 +616,7 @@ export const api = {
   },
 
   /* --- transfers: POST /api/v1/transfers | withdrawals | internal-transfers --- */
-  async createTransfer(kind: TransferKind, amountCents: number, dest: { beneficiaryId?: string; railId?: string; email?: string }, note?: string) {
+  async createTransfer(kind: TransferKind, amountCents: number, dest: { beneficiaryId?: string; railId?: string; email?: string }, note?: string, reuseKey?: string) {
     await sleep(750);
     const u = me();
     const k = db.kyc.find((x) => x.userId === u.id);
@@ -624,13 +645,19 @@ export const api = {
     const bal = balancesFor(u.id);
     if (!fields.amount && total > bal.availableCents)
       fields.amount = `Insufficient balance — you need ${(total / 100).toFixed(2)} but only have ${(bal.availableCents / 100).toFixed(2)} available.`;
+    if (!fields.amount && getDailyOutflowCents() + total > DAILY_LIMIT_CENTS)
+      fields.amount = `Daily outflow limit of $${(DAILY_LIMIT_CENTS / 100).toLocaleString("en-US")} reached — retry tomorrow or move a smaller amount.`;
     if (Object.keys(fields).length) throw new ApiError("Check the highlighted fields.", fields);
 
     const t: Transfer = {
       id: uid("TR"), userId: u.id, kind, amountCents, feeCents: fee, destination,
       note: note?.trim() || undefined, status: "PROCESSING", providerRef: `pv_${uid("rf")}`,
+      idempotencyKey: reuseKey ?? idemKey(),
       createdAt: Date.now(),
-      events: [ev("CREATED"), ev("PROCESSING", `${(total / 100).toFixed(2)} USD reserved on ledger`)],
+      events: [
+        ev("CREATED", reuseKey ? `Idempotency-Key replayed (${reuseKey.slice(0, 14)}…) — safe retry, no double-post` : "Idempotency-Key accepted"),
+        ev("PROCESSING", `${(total / 100).toFixed(2)} USD reserved on ledger`),
+      ],
     };
     postEntry({ ts: Date.now(), description: `Reservation — ${kindLabel(kind).toLowerCase()} to ${destination}`, counterparty: destination, amountCents: -total, type: "RESERVE", status: "PENDING", refKind: "TRANSFER", refId: t.id });
     db.transfers.push(t);

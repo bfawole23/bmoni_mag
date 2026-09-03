@@ -3,7 +3,7 @@ import { api, SANDBOX_HINTS } from "../mock/api";
 import { ApiError } from "../types";
 import { useStore } from "../state/store";
 import { Button, Card, ErrorBanner, Field, Segmented, StatusPill, Toggle, CopyChip, Modal } from "../components/ui";
-import { IconUser, IconDevice, IconGear, IconHelp, IconCheck, IconShield, IconWallet, IconBolt, IconChevronD, IconTrash, IconGlobe } from "../components/icons";
+import { IconUser, IconDevice, IconGear, IconHelp, IconCheck, IconShield, IconWallet, IconBolt, IconChevronD, IconTrash, IconGlobe, IconLock, IconReceipt } from "../components/icons";
 import { cx, fmtDate, timeAgo } from "../lib/utils";
 
 type Tab = "profile" | "sessions" | "settings" | "help";
@@ -183,6 +183,68 @@ export function AccountScreen() {
           </Card>
 
           <div className="space-y-4">
+            <Card className="overflow-hidden">
+              <div className="border-b border-line px-6 py-4">
+                <h3 className="flex items-center gap-2 font-display text-[12px] font-bold uppercase tracking-[0.12em] text-ink-soft">
+                  <IconBolt className="text-[14px] text-gold-ink" /> Build roadmap
+                </h3>
+                <p className="mt-1 text-[12px] text-mute">Phases 0–11 from the build plan — this console is Phase 1.</p>
+              </div>
+              <div className="divide-y divide-line/60">
+                {PHASES.map((p) => (
+                  <div key={p.n} className={cx("flex items-center gap-3 px-5 py-2", p.state === "active" && "bg-gold-soft/60")}>
+                    <span className={cx(
+                      "flex h-7 w-7 shrink-0 items-center justify-center rounded-md font-mono text-[11px] font-bold",
+                      p.state === "done" ? "bg-ok-soft text-ok" : p.state === "active" ? "bg-gold text-pine-ink" : "border border-line bg-paper text-mute",
+                    )}>
+                      {p.state === "done" ? <IconCheck className="text-[12px]" /> : p.n}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className={cx("block text-[12.5px] font-semibold leading-tight", p.state === "next" ? "text-mute" : "text-ink")}>{p.name}</span>
+                      <span className="block truncate text-[10.5px] text-mute">{p.note}</span>
+                    </span>
+                    {p.state === "active"
+                      ? <span className="shrink-0 rounded-full bg-gold px-2 py-0.5 font-display text-[9px] font-bold uppercase tracking-wide text-pine-ink">live now</span>
+                      : p.state === "done"
+                        ? <span className="shrink-0 font-mono text-[9.5px] font-semibold uppercase text-ok">done</span>
+                        : <IconLock className="shrink-0 text-[12px] text-mute/60" />}
+                  </div>
+                ))}
+              </div>
+            </Card>
+
+            <Card className="overflow-hidden">
+              <div className="border-b border-line px-6 py-4">
+                <h3 className="flex items-center gap-2 font-display text-[12px] font-bold uppercase tracking-[0.12em] text-ink-soft">
+                  <IconReceipt className="text-[14px] text-pine" /> API contract
+                </h3>
+                <p className="mt-1 text-[12px] text-mute">Every call in this shell maps 1:1 onto a versioned route.</p>
+              </div>
+              <div className="space-y-3.5 px-6 py-4">
+                {CONTRACTS.map((g) => (
+                  <div key={g.group}>
+                    <p className="mb-1 font-mono text-[9.5px] uppercase tracking-[0.18em] text-mute">{g.group}</p>
+                    <div className="space-y-0.5">
+                      {g.routes.map(([m, path]) => (
+                        <p key={m + path} className="flex items-center gap-2 font-mono text-[11px] text-ink-soft">
+                          <span className={cx(
+                            "w-[54px] shrink-0 rounded px-1 py-0.5 text-center text-[9px] font-bold",
+                            m === "GET" ? "bg-pine-mist text-pine-deep" : m === "POST" ? "bg-gold-soft text-gold-ink"
+                              : m === "PATCH" ? "bg-info-soft text-info" : "bg-bad-soft text-bad",
+                          )}>{m}</span>
+                          <span className="truncate">/api/v1{path}</span>
+                        </p>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+                <p className="border-t border-line pt-2.5 text-[11px] leading-relaxed text-mute">
+                  Money-mutating routes accept an <span className="font-mono text-[10px] text-ink-soft">Idempotency-Key</span>; provider
+                  webhooks arrive HMAC-signed. Both are already modelled in the sandbox.
+                </p>
+              </div>
+            </Card>
+
             <Card className="p-6">
               <h3 className="font-display text-[12px] font-bold uppercase tracking-[0.12em] text-ink-soft">Sandbox triggers</h3>
               <p className="mt-1 text-[12px] text-mute">Deterministic ways to exercise every failure state:</p>
@@ -238,4 +300,32 @@ const FAQS = [
   { q: "Why can't I fund or send money?", a: "Both flows pass the KYC-eligibility gate. Verify your identity first (the sandbox approval takes a few seconds), then the gates open." },
   { q: "Is any of this real?", a: "No. Phase 1 runs entirely on a mocked apiClient with a local ledger. Phases 2–3 swap the mock for the FastAPI server and Supabase without changing a single screen." },
   { q: "How do webhooks work here?", a: "Provider timers play the role of webhooks: they mutate the record, append a state event, then post ledger entries — exactly the order the signed-webhook handler will follow in Phase 5+." },
+  { q: "What is the Idempotency-Key?", a: "A client-generated key attached to every funding intent and transfer. Replaying a confirm with the same key returns the original record instead of creating a second one — the failed-transfer retry button does exactly this, so a flaky network can never double-spend." },
+  { q: "How are limits enforced?", a: "Funding has per-intent minimums and maximums; outflows (send + withdraw) are capped at a daily limit computed from today's non-failed intents. Both checks run in the API layer before any reservation touches the ledger." },
+];
+
+const PHASES: Array<{ n: number; name: string; note: string; state: "done" | "active" | "next" }> = [
+  { n: 0, name: "Product Foundation", note: "Repo scaffold · API contracts · DB entity list", state: "done" },
+  { n: 1, name: "UI Shell", note: "This console — every screen on mock data, full state coverage", state: "active" },
+  { n: 2, name: "Application Server", note: "FastAPI /api/v1 · validation · idempotency foundation", state: "next" },
+  { n: 3, name: "User", note: "Real auth & JWT sessions behind AuthProviderAdapter", state: "next" },
+  { n: 4, name: "Wallet", note: "Ledger-backed balances · transaction history", state: "next" },
+  { n: 5, name: "KYC", note: "Provider adapter · signed webhooks · state machine", state: "next" },
+  { n: 6, name: "Rail", note: "Account linking & validation · beneficiaries", state: "next" },
+  { n: 7, name: "Fund", note: "Intents → provider → webhook → ledger post", state: "next" },
+  { n: 8, name: "Move Money", note: "Reservations · fees · limits · full lifecycle", state: "next" },
+  { n: 9, name: "Infrastructure", note: "Hosting · secrets · queues · CI/CD (gated on 1–8)", state: "next" },
+  { n: 10, name: "Security & Compliance", note: "Hardening pass · audit logs · fraud controls", state: "next" },
+  { n: 11, name: "Testing & Launch", note: "Unit / integration / E2E · sandbox certification", state: "next" },
+];
+
+const CONTRACTS: Array<{ group: string; routes: Array<[string, string]> }> = [
+  { group: "auth", routes: [["POST", "/auth/signup"], ["POST", "/auth/login"], ["POST", "/auth/logout"], ["POST", "/auth/password-reset"]] },
+  { group: "users", routes: [["GET", "/users/me"], ["PATCH", "/users/me"], ["GET", "/users/me/devices"], ["DELETE", "/users/me/devices/:id"]] },
+  { group: "wallets", routes: [["GET", "/wallets/me"], ["GET", "/wallets/me/balances"], ["GET", "/wallets/me/transactions"], ["GET", "/wallets/me/ledger"]] },
+  { group: "kyc", routes: [["GET", "/kyc/me"], ["POST", "/kyc/submit"], ["POST", "/kyc/retry"], ["POST", "/webhooks/kyc"]] },
+  { group: "rails", routes: [["GET", "/rails/accounts"], ["POST", "/rails/accounts"], ["POST", "/rails/accounts/:id/deactivate"], ["POST", "/rails/accounts/:id/reactivate"], ["DELETE", "/rails/accounts/:id"]] },
+  { group: "beneficiaries", routes: [["GET", "/rails/beneficiaries"], ["POST", "/rails/beneficiaries"], ["POST", "/rails/beneficiaries/:id/deactivate"], ["DELETE", "/rails/beneficiaries/:id"]] },
+  { group: "funding", routes: [["GET", "/funding/intents"], ["POST", "/funding/intents"], ["POST", "/funding/intents/:id/confirm"], ["POST", "/funding/intents/:id/cancel"], ["POST", "/webhooks/payments"]] },
+  { group: "money movement", routes: [["POST", "/transfers"], ["POST", "/withdrawals"], ["POST", "/internal-transfers"], ["POST", "/transfers/:id/cancel"], ["GET", "/transfers"], ["POST", "/webhooks/rails"]] },
 ];

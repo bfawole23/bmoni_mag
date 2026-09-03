@@ -266,7 +266,10 @@ function ActiveIntent({ intent, secsLeft, onPaid, onCancel, onRestart, busy }: {
         <h2 className="font-display text-[19px] font-bold tracking-tight text-ink">{methodLabel(intent.method)}</h2>
         <StatusPill status={intent.status} />
       </div>
-      <p className="mt-1 font-mono text-[12px] text-mute">{intent.providerRef} · created {fmtDateTime(intent.createdAt)}</p>
+      <div className="mt-1.5 flex flex-wrap items-center gap-2 font-mono text-[12px] text-mute">
+        <span>{intent.providerRef} · created {fmtDateTime(intent.createdAt)}</span>
+        {intent.idempotencyKey && <CopyChip text={intent.idempotencyKey} label={`key ${intent.idempotencyKey.slice(0, 12)}…`} />}
+      </div>
 
       {intent.status === "REQUIRES_ACTION" && (
         <div className="mt-5 space-y-4">
