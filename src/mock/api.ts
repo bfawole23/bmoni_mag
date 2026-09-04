@@ -102,7 +102,13 @@ function seed(): DB {
 
 function load(): DB | null {
   const raw = LS.get<DB | null>(DB_KEY, null);
-  return raw && Array.isArray(raw.users) ? raw : null;
+  if (!raw || !Array.isArray(raw.users)) return null;
+  /* shape guard: a stale sandbox from an older build may be missing
+     collections — fall back to a clean seed instead of crashing at boot */
+  const arrays: Array<keyof DB> = ["ledger", "kyc", "rails", "beneficiaries", "funding", "transfers", "notifications", "devices"];
+  if (!arrays.every((k) => Array.isArray(raw[k]))) return null;
+  if (!raw.resetCodes || typeof raw.resetCodes !== "object") raw.resetCodes = {};
+  return raw;
 }
 function save(d: DB = db) { LS.set(DB_KEY, d); }
 function emit() { listeners.forEach((l) => l()); }

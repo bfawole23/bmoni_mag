@@ -61,9 +61,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let alive = true;
-    const sync = () => { if (alive) setSnap(api.getSnapshot()); };
+    const sync = () => {
+      if (!alive) return;
+      try { setSnap(api.getSnapshot()); }
+      catch (e) { console.error("[bmoni] snapshot failed", e); }
+    };
     const unsub = api.subscribe(sync);
-    api.init().then(() => { sync(); if (alive) setReady(true); });
+    api.init()
+      .then(() => { sync(); if (alive) setReady(true); })
+      .catch((e) => { console.error("[bmoni] init failed", e); if (alive) setReady(true); });
     return () => { alive = false; unsub(); };
   }, []);
 

@@ -15,6 +15,22 @@
   </head>
   <body>
     <div id="root"></div>
+    <script>
+      /* boot guard: if the app bundle never mounts (blocked/404'd assets),
+         surface a readable message instead of a blank page */
+      window.addEventListener("load", function () {
+        setTimeout(function () {
+          var r = document.getElementById("root");
+          if (r && r.childElementCount === 0) {
+            r.innerHTML =
+              '<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:#122921;color:#f0f5ef;font-family:ui-monospace,monospace;padding:24px;text-align:center">' +
+              '<div><p style="font-size:18px;font-weight:700;margin:0 0 8px">BMONI Embedded — bundle did not load</p>' +
+              '<p style="font-size:13px;color:#9db3a5;margin:0 0 16px">The app script was blocked or not found. Serve the built <b>dist/</b> folder over HTTP (e.g. <b>npm run preview</b>) rather than opening index.html directly, then hard-refresh.</p>' +
+              '<button onclick="location.reload()" style="background:#c9862f;color:#241703;border:0;border-radius:8px;padding:10px 18px;font-weight:700;cursor:pointer">Retry</button></div></div>';
+          }
+        }, 2500);
+      });
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
