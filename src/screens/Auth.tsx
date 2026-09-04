@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api } from "../mock/api";
+import { api, SUPABASE_MODE } from "../mock/api";
 import { ApiError } from "../types";
 import { useStore } from "../state/store";
 import { Button, ErrorBanner, Field } from "../components/ui";
@@ -203,7 +203,19 @@ export function AuthScreen() {
             )}
           </div>
 
-          {mode === "login" && (
+          {mode === "login" && SUPABASE_MODE && (
+            <div className="mt-8 flex items-center justify-between gap-3 rounded-xl border border-pine/25 bg-pine-mist/60 px-4 py-3.5">
+              <span>
+                <span className="flex items-center gap-2 font-display text-[12px] font-bold uppercase tracking-[0.1em] text-pine-deep">
+                  <IconBolt className="text-[13px]" /> Supabase mode
+                </span>
+                <span className="mt-1 block font-mono text-[12px] text-mute">auth + ledger on your project — create an account to begin</span>
+              </span>
+              <span className="flex items-center gap-1.5 font-mono text-[10px] text-ok"><span className="h-1.5 w-1.5 rounded-full bg-ok dot-live" />linked</span>
+            </div>
+          )}
+
+          {mode === "login" && !SUPABASE_MODE && (
             <button
               onClick={() => { setEmail("demo@bmoni.app"); setPassword("bmoni-demo"); setFormError(null); setFields({}); }}
               className="group mt-8 w-full rounded-xl border border-dashed border-line-strong bg-surface/70 px-4 py-3.5 text-left transition-all hover:border-pine hover:bg-pine-mist/50"

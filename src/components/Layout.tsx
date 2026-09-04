@@ -1,6 +1,6 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { useStore, type Route } from "../state/store";
-import { api } from "../mock/api";
+import { api, SUPABASE_MODE } from "../mock/api";
 import { cx, initials, timeAgo } from "../lib/utils";
 import { Button, Modal, StatusPill, ToastHost } from "./ui";
 import {
@@ -86,7 +86,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
       <div className="border-t border-[#1d3629] px-5 py-4">
         <div className="flex items-center gap-2 text-[11px] text-[#5f7a6c]">
           <IconShield className="text-[13px]" />
-          <span>Phase 1 · mock data only</span>
+          <span>{SUPABASE_MODE ? "Phase 1 · Supabase backend" : "Phase 1 · mock data only"}</span>
         </div>
       </div>
     </div>
@@ -231,7 +231,7 @@ export function Layout({ children }: { children: ReactNode }) {
 
         <footer className="border-t border-line/70 px-4 py-4 sm:px-8">
           <div className="mx-auto flex w-full max-w-[1180px] flex-wrap items-center justify-between gap-2 text-[11.5px] text-mute">
-            <span className="font-mono">BMONI Embedded · Phase 1 UI shell — all data is mocked in <code className="rounded bg-pine-mist px-1 py-0.5 text-pine-deep">apiClient</code></span>
+            <span className="font-mono">BMONI Embedded · Phase 1 UI shell — {SUPABASE_MODE ? <>backend live on <code className="rounded bg-pine-mist px-1 py-0.5 text-pine-deep">Supabase</code></> : <>all data mocked in <code className="rounded bg-pine-mist px-1 py-0.5 text-pine-deep">apiClient</code></>}</span>
             <span className="flex items-center gap-1.5"><span className="h-1.5 w-1.5 rounded-full bg-ok dot-live" /> sandbox operational</span>
           </div>
         </footer>

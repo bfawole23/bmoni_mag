@@ -16,13 +16,22 @@ import {
   type User,
 } from "../types";
 import { LS, maskAccount, sleep, uid } from "../lib/utils";
+import { isSupabaseMode } from "../lib/supabase";
+import {
+  loadLocalDevices, saveLocalDevices, sbFlush, sbLoadAll, sbRequestReset,
+  sbRestore, sbSignIn, sbSignOut, sbSignUp,
+} from "../lib/supabasePersistence";
 
 const DB_KEY = "bmoni.db.v2";
 const SESSION_KEY = "bmoni.session.v2";
 
-interface UserRecord extends User { password: string; }
+/* Backend mode: Supabase when VITE_SUPABASE_URL + VITE_SUPABASE_ANON_KEY are
+   set, otherwise the local sandbox ledger (Phase 1 default). */
+export const SUPABASE_MODE = isSupabaseMode();
 
-interface DB {
+export interface UserRecord extends User { password: string; }
+
+export interface DB {
   users: UserRecord[];
   ledger: LedgerEntry[];
   kyc: KycProfile[];
@@ -40,8 +49,21 @@ const now = Date.now();
 const H = 3600_000;
 const D = 24 * H;
 
-let db: DB = load() ?? seed();
+const FRESH_DEVICES = (): Device[] => [
+  { id: uid("DV"), label: "This browser", location: "Sandbox device", lastActive: Date.now(), current: true },
+];
+
+function emptyDb(): DB {
+  return {
+    users: [], ledger: [], kyc: [], rails: [], beneficiaries: [], funding: [],
+    transfers: [], notifications: [], devices: loadLocalDevices(FRESH_DEVICES()), resetCodes: {},
+  };
+}
+
+let db: DB = SUPABASE_MODE ? emptyDb() : (load() ?? seed());
 let listeners: Array<() => void> = [];
+let sbUserId: string | null = null;
+let flushTimer: number | undefined;
 
 /* ------------------------------------------------------------------ */
 /* seed                                                                */
@@ -112,7 +134,36 @@ function load(): DB | null {
   if (!raw.resetCodes || typeof raw.resetCodes !== "object") raw.resetCodes = {};
   return raw;
 }
-function save(d: DB = db) { LS.set(DB_KEY, d); }
+function save(d: DB = db) {
+  if (SUPABASE_MODE) {
+    saveLocalDevices(d.devices);
+    if (!sbUserId) return; // signed out — nothing to persist remotely
+    window.clearTimeout(flushTimer);
+    flushTimer = window.setTimeout(() => {
+      sbFlush(sbUserId!, db).catch((e) => console.error("[bmoni] supabase flush failed", e));
+    }, 700);
+    return;
+  }
+  LS.set(DB_KEY, d);
+}
+
+/* Supabase boot: pull the signed-in user's whole state from Postgres */
+async function loadRemote(userId: string) {
+  const r = await sbLoadAll(userId);
+  if (!r.profile) {
+    /* auth row without a profile (trigger race) — drop to a clean state */
+    await sbSignOut().catch(() => undefined);
+    sbUserId = null;
+    db = emptyDb();
+    return;
+  }
+  db = {
+    users: [r.profile], ledger: r.ledger, kyc: r.kyc ? [r.kyc] : [],
+    rails: r.rails, beneficiaries: r.beneficiaries, funding: r.funding,
+    transfers: r.transfers, notifications: r.notifications,
+    devices: loadLocalDevices(FRESH_DEVICES()), resetCodes: {},
+  };
+}
 function emit() { listeners.forEach((l) => l()); }
 function after(ms: number, fn: () => void) {
   window.setTimeout(() => {
@@ -126,7 +177,7 @@ function after(ms: number, fn: () => void) {
 /* ------------------------------------------------------------------ */
 /* internals                                                           */
 /* ------------------------------------------------------------------ */
-const sessionUserId = () => LS.get<string | null>(SESSION_KEY, null);
+const sessionUserId = () => (SUPABASE_MODE ? sbUserId : LS.get<string | null>(SESSION_KEY, null));
 const me = (): UserRecord => {
   const u = db.users.find((x) => x.id === sessionUserId());
   if (!u) throw new ApiError("Session expired — sign in again.");
@@ -365,13 +416,26 @@ export const api = {
   getSnapshot(): Snapshot { return snapshot(); },
 
   async init() {
-    await sleep(500);
+    if (SUPABASE_MODE) {
+      try {
+        const restored = await sbRestore();
+        if (restored) { sbUserId = restored; await loadRemote(restored); }
+      } catch (e) { console.error("[bmoni] supabase session restore failed", e); }
+    }
+    await sleep(SUPABASE_MODE ? 200 : 500);
     reconcile();
     save(); emit();
   },
 
   /* --- auth: POST /api/v1/auth/{login,signup,logout,password-reset} --- */
   async login(email: string, password: string) {
+    if (SUPABASE_MODE) {
+      const userId = await sbSignIn(email, password);
+      sbUserId = userId;
+      await loadRemote(userId);
+      emit();
+      return;
+    }
     await sleep(750);
     const u = db.users.find((x) => x.email.toLowerCase() === email.trim().toLowerCase());
     if (!u || u.password !== password) throw new ApiError("Invalid email or password. Try the demo credentials below.");
@@ -384,8 +448,20 @@ export const api = {
     if (name.trim().length < 2) fields.name = "Enter your full legal name.";
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) fields.email = "Enter a valid email address.";
     if (password.length < 8) fields.password = "Password must be at least 8 characters.";
-    if (db.users.some((x) => x.email.toLowerCase() === email.trim().toLowerCase())) fields.email = "An account already exists for this email.";
+    if (!SUPABASE_MODE && db.users.some((x) => x.email.toLowerCase() === email.trim().toLowerCase())) fields.email = "An account already exists for this email.";
     if (Object.keys(fields).length) throw new ApiError("Check the highlighted fields.", fields);
+    if (SUPABASE_MODE) {
+      const userId = await sbSignUp(name, email, password);
+      sbUserId = userId;
+      db = {
+        ...emptyDb(),
+        users: [{ id: userId, name: name.trim(), email: email.trim().toLowerCase(), password: "", phone: "", status: "ACTIVE", createdAt: Date.now() }],
+        kyc: [{ userId, status: "NOT_STARTED", attempts: 0, events: [] }],
+        notifications: [{ id: uid("NT"), userId, ts: Date.now(), title: "Welcome to BMONI Embedded", body: "Your wallet is live on Supabase. Verify your identity to unlock funding and transfers.", kind: "info", read: false }],
+      };
+      save(); emit();
+      return;
+    }
     const u: UserRecord = {
       id: uid("U"), name: name.trim(), email: email.trim().toLowerCase(), password,
       phone: "", status: "ACTIVE", createdAt: Date.now(),
@@ -396,14 +472,20 @@ export const api = {
     LS.set(SESSION_KEY, u.id);
     save(); emit();
   },
-  async logout() { await sleep(300); LS.del(SESSION_KEY); emit(); },
+  async logout() {
+    await sleep(300);
+    if (SUPABASE_MODE) { await sbSignOut(); sbUserId = null; db = emptyDb(); emit(); return; }
+    LS.del(SESSION_KEY); emit();
+  },
   async requestReset(email: string) {
     await sleep(800);
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new ApiError("Enter a valid email address.", { email: "Enter a valid email address." });
+    if (SUPABASE_MODE) { await sbRequestReset(email); return; }
     db.resetCodes[email.trim().toLowerCase()] = "246810";
     save();
   },
   async confirmReset(email: string, code: string, newPassword: string) {
+    if (SUPABASE_MODE) throw new ApiError("Supabase mode: use the reset link that was emailed to you to set a new password, then sign in here.");
     await sleep(700);
     const key = email.trim().toLowerCase();
     if (db.resetCodes[key] !== code.trim()) throw new ApiError("That code doesn't match.", { code: "Code mismatch — sandbox code is 246810." });
