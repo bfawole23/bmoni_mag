@@ -113,7 +113,12 @@ function load(): DB | null {
 function save(d: DB = db) { LS.set(DB_KEY, d); }
 function emit() { listeners.forEach((l) => l()); }
 function after(ms: number, fn: () => void) {
-  window.setTimeout(() => { fn(); save(); emit(); }, ms);
+  window.setTimeout(() => {
+    /* a settlement timer must never take the console down — e.g. it can fire
+       after sign-out, when me() has no session to resolve */
+    try { fn(); save(); emit(); }
+    catch (e) { console.warn("[bmoni] sandbox timer recovered from error", e); }
+  }, ms);
 }
 
 /* ------------------------------------------------------------------ */

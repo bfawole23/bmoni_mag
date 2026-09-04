@@ -16,19 +16,30 @@
   <body>
     <div id="root"></div>
     <script>
-      /* boot guard: if the app bundle never mounts (blocked/404'd assets),
-         surface a readable message instead of a blank page */
+      /* boot guard: if the app never mounts (blocked/404'd assets, or the
+         bundle crashes before painting), surface a readable message instead
+         of a blank page. Checks repeatedly for the first 20 seconds. */
+      window.__bmoniPainted = false;
       window.addEventListener("load", function () {
-        setTimeout(function () {
-          var r = document.getElementById("root");
-          if (r && r.childElementCount === 0) {
-            r.innerHTML =
-              '<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:#122921;color:#f0f5ef;font-family:ui-monospace,monospace;padding:24px;text-align:center">' +
-              '<div><p style="font-size:18px;font-weight:700;margin:0 0 8px">BMONI Embedded — bundle did not load</p>' +
-              '<p style="font-size:13px;color:#9db3a5;margin:0 0 16px">The app script was blocked or not found. Serve the built <b>dist/</b> folder over HTTP (e.g. <b>npm run preview</b>) rather than opening index.html directly, then hard-refresh.</p>' +
-              '<button onclick="location.reload()" style="background:#c9862f;color:#241703;border:0;border-radius:8px;padding:10px 18px;font-weight:700;cursor:pointer">Retry</button></div></div>';
-          }
-        }, 2500);
+        var r = document.getElementById("root");
+        var shown = false;
+        function fail() {
+          if (shown || !r) return;
+          shown = true;
+          r.innerHTML =
+            '<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:#122921;color:#f0f5ef;font-family:ui-monospace,monospace;padding:24px;text-align:center">' +
+            '<div><p style="font-size:18px;font-weight:700;margin:0 0 8px">BMONI Embedded — app did not start</p>' +
+            '<p style="font-size:13px;color:#9db3a5;margin:0 0 8px">The bundle was blocked, not found, or crashed before painting.</p>' +
+            '<p style="font-size:12px;color:#7e9487;margin:0 0 16px">Fixes: hard-refresh (Ctrl/Cmd+Shift+R) · serve the built <b>dist/</b> over HTTP (<b>npm run preview</b>) instead of opening the file directly · open DevTools → Console for the real error.</p>' +
+            '<button onclick="try{Object.keys(localStorage).filter(function(k){return k.indexOf(&quot;bmoni.&quot;)===0}).forEach(function(k){localStorage.removeItem(k)})}catch(e){}location.reload()" style="background:#c9862f;color:#241703;border:0;border-radius:8px;padding:10px 18px;font-weight:700;cursor:pointer;margin-right:8px">Reset sandbox data</button>' +
+            '<button onclick="location.reload()" style="background:transparent;color:#c4d3c8;border:1px solid #2c4a3b;border-radius:8px;padding:10px 18px;font-weight:600;cursor:pointer">Reload</button></div></div>';
+        }
+        var t0 = Date.now();
+        var iv = setInterval(function () {
+          if (window.__bmoniPainted) { clearInterval(iv); return; }
+          if (!r || r.childElementCount === 0) { if (Date.now() - t0 > 2500) fail(); }
+          if (Date.now() - t0 > 20000) clearInterval(iv);
+        }, 750);
       });
     </script>
     <script type="module" src="/src/main.tsx"></script>

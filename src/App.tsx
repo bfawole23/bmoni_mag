@@ -1,4 +1,4 @@
-import { Component, type ErrorInfo, type ReactNode } from "react";
+import { Component, useEffect, type ErrorInfo, type ReactNode } from "react";
 import { StoreProvider, useStore } from "./state/store";
 import { Layout } from "./components/Layout";
 import { AuthScreen } from "./screens/Auth";
@@ -71,6 +71,14 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | 
   }
 }
 
+/* tells the boot watchdog in index.html that React painted real content */
+function PaintMarker() {
+  useEffect(() => {
+    (window as unknown as { __bmoniPainted?: boolean }).__bmoniPainted = true;
+  }, []);
+  return null;
+}
+
 function Router() {
   const { ready, snap, route } = useStore();
   if (!ready) return <BootSplash />;
@@ -91,6 +99,7 @@ function Router() {
 export default function App() {
   return (
     <ErrorBoundary>
+      <PaintMarker />
       <StoreProvider>
         <Router />
       </StoreProvider>
