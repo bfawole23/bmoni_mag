@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="BMONI Embedded — money infrastructure console. Wallets, ledger, KYC, rails, funding and money movement." />
+    <title>BMONI Embedded — Money Infrastructure Console</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Instrument+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23122921'/%3E%3Cpath d='M10 8h8.5a4 4 0 0 1 0 8H10zm0 8h10a4 4 0 0 1 0 8H10z' fill='none' stroke='%23E8B25C' stroke-width='2.4'/%3E%3C/svg%3E" />
+  </head>
+  <body style="margin:0;background:#122921">
+    <div id="root">
+      <!-- instant boot splash: the page is never blank while the bundle loads -->
+      <div style="min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#122921;font-family:ui-monospace,monospace">
+        <svg width="56" height="56" viewBox="0 0 32 32" style="animation:bmoni-breathe 3.2s ease-in-out infinite"><rect width="32" height="32" rx="7" fill="#0d1f18" stroke="#2c4a3b"/><path d="M10 8h8.5a4 4 0 0 1 0 8H10zm0 8h10a4 4 0 0 1 0 8H10z" fill="none" stroke="#E8B25C" stroke-width="2.4"/></svg>
+        <p style="margin:20px 0 0;font-size:20px;font-weight:700;color:#f0f5ef;font-family:ui-sans-serif,system-ui,sans-serif;letter-spacing:-.01em">BMONI Embedded</p>
+        <p style="margin:6px 0 0;font-size:10.5px;text-transform:uppercase;letter-spacing:.24em;color:#7e9487">warming the sandbox ledger</p>
+        <style>@keyframes bmoni-breathe{0%,100%{transform:scale(1);opacity:.7}50%{transform:scale(1.06);opacity:1}}</style>
+      </div>
+    </div>
+    <script>
+      /* boot diagnostics: capture asset load failures (they don't bubble —
+         use the capture phase) and runtime errors BEFORE the bundle exists */
+      window.__bmoniPainted = false;
+      window.__bmoniBootErrors = [];
+      window.__bmoniRetried = { js: false, css: false };
+      window.addEventListener("error", function (e) {
+        var t = e.target;
+        /* absolute → page-relative path (heals sub-path serving) */
+        function rel(url) { try { return new URL(url).pathname.replace(/^\/+/, ""); } catch (err) { return null; } }
+        if (t && t.tagName === "SCRIPT") {
+          window.__bmoniBootErrors.push("Script asset failed to load: " + (t.src || "?"));
+          var p = t.src ? rel(t.src) : null;
+          if (p && p.indexOf("assets/") === 0 && !window.__bmoniRetried.js) {
+            window.__bmoniRetried.js = true;
+            var s = document.createElement("script");
+            s.type = "module"; s.src = p;
+            s.addEventListener("error", function () { window.__bmoniBootErrors.push("Relative retry also failed: " + p); });
+            document.head.appendChild(s);
+          }
+        } else if (t && t.tagName === "LINK") {
+          window.__bmoniBootErrors.push("Stylesheet failed to load: " + (t.href || "?"));
+          var c = t.href ? rel(t.href) : null;
+          if (c && c.indexOf("assets/") === 0 && !window.__bmoniRetried.css) {
+            window.__bmoniRetried.css = true;
+            var l = document.createElement("link");
+            l.rel = "stylesheet"; l.href = c;
+            document.head.appendChild(l);
+          }
+        } else if (e.message) {
+          window.__bmoniBootErrors.push(e.message + (e.filename ? " @ " + e.filename.split("/").pop() + ":" + e.lineno : ""));
+        }
+      }, true);
+
+      window.addEventListener("load", function () {
+        var r = document.getElementById("root");
+        var shown = false;
+        function esc(s) { return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+        function fail() {
+          if (shown || !r) return;
+          shown = true;
+          var errs = window.__bmoniBootErrors.slice(0, 4);
+          var assetDead = errs.some(function (s) { return s.indexOf("Asset failed") === 0; });
+          var diag = errs.length
+            ? '<p style="font-size:10px;text-transform:uppercase;letter-spacing:.18em;color:#7e9487;margin:20px 0 6px">Diagnostics</p>' +
+              '<div style="text-align:left;background:#0d1f18;border:1px solid #24443566;border-radius:10px;padding:12px 14px">' +
+              errs.map(function (s) { return '<p style="margin:0 0 6px;font-size:11.5px;line-height:1.5;color:#e8a79c;word-break:break-all">' + esc(s) + '</p>'; }).join("") + "</div>"
+            : "";
+          var hint = assetDead
+            ? "The compiled bundle never reached the browser. The whole <b>dist/</b> folder must be served over HTTP — locally: <b>npm run preview</b> → http://localhost:4173. Opening index.html as a file, or serving the HTML alone, cannot work."
+            : "The bundle loaded but crashed before painting. Resetting sandbox data fixes most causes; the diagnostics above name the exact error.";
+          r.innerHTML =
+            '<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:#122921;color:#f0f5ef;font-family:ui-monospace,monospace;padding:24px">' +
+            '<div style="max-width:520px;width:100%"><p style="font-size:19px;font-weight:700;margin:0;font-family:ui-sans-serif,system-ui,sans-serif">BMONI Embedded — app did not start</p>' +
+            '<p style="font-size:13px;color:#9db3a5;line-height:1.6;margin:10px 0 0">' + hint + "</p>" + diag +
+            '<div style="margin-top:22px;display:flex;gap:10px;flex-wrap:wrap">' +
+            '<button onclick="try{Object.keys(localStorage).filter(function(k){return k.indexOf(&quot;bmoni.&quot;)===0}).forEach(function(k){localStorage.removeItem(k)})}catch(e){}location.reload()" style="background:#c9862f;color:#241703;border:0;border-radius:9px;padding:11px 18px;font-size:13.5px;font-weight:700;cursor:pointer">Reset sandbox data</button>' +
+            '<button onclick="location.reload()" style="background:transparent;color:#c4d3c8;border:1px solid #2c4a3b;border-radius:9px;padding:11px 18px;font-size:13.5px;font-weight:600;cursor:pointer">Reload</button>' +
+            "</div></div></div>";
+        }
+        var scriptDead = function () {
+          return window.__bmoniBootErrors.some(function (s) {
+            return s.indexOf("Script asset failed") === 0 || s.indexOf("Relative retry also failed") === 0;
+          });
+        };
+        var t0 = Date.now();
+        var iv = setInterval(function () {
+          if (window.__bmoniPainted) { clearInterval(iv); return; }
+          var el = Date.now() - t0;
+          /* asset 404 confirmed (after the relative retry had a chance) → fail early;
+             otherwise give the bundle 6s to mount before declaring failure */
+          if (scriptDead() && el > 2500) fail();
+          else if (el > 6000) fail();
+          if (el > 20000) clearInterval(iv);
+        }, 700);
+      });
+    </script>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
