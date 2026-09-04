@@ -35,11 +35,13 @@ interface DB {
   resetCodes: Record<string, string>;
 }
 
-let db: DB = load() ?? seed();
-let listeners: Array<() => void> = [];
+/* time constants must exist before seed() runs below (TDZ-safe) */
 const now = Date.now();
 const H = 3600_000;
 const D = 24 * H;
+
+let db: DB = load() ?? seed();
+let listeners: Array<() => void> = [];
 
 /* ------------------------------------------------------------------ */
 /* seed                                                                */
